@@ -56,11 +56,11 @@ Status ShapeFn(InferenceContext* c)
  * register the operation with necessary options
  */
 REGISTER_OP("CholUpdate")
-		.Input("r: T")
+		.Input("r: Ref(T)")
 		.Input("x: T")
-		.Output("c: T")
+		.Output("c: Ref(T)")
         .Attr(GetConvnetDataFormatAttrString())
-		.Attr("T: {int32, float32, float64}")
+		.Attr("T: {float32, float64}")
 		.Attr("use_locking: bool = true")
 		.SetShapeFn(ShapeFn);
 
@@ -73,11 +73,11 @@ template <typename dtype>
 struct launchCholUpdateKernel<CPUDevice, dtype> {
 	void operator()(const CPUDevice& d,
 			typename TTypes<dtype>::Flat R, typename TTypes<dtype>::Flat x,
-            typename TTypes<dtype>::ConstFlat R_in, typename TTypes<dtype>::ConstFlat x_in,
+            typename TTypes<dtype>::ConstFlat x_in,
 			int batch_size, int dim) {
 		//based on https://stackoverflow.com/a/16160905/1097517
-		R.setZero();
-		R += R_in;
+		//R.setZero();
+		//R += R_in;
 		x.setZero();
 		x += x_in;
 
@@ -120,19 +120,26 @@ public:
                                 "on device type ",
                                 DeviceTypeString(context->device_type())));
 
-		// const DataType dt = DataTypeToEnum<dtype>::v();
-		// OP_REQUIRES_OK(context,
-		// 			context->MatchSignature({MakeRefType(dt), dt},
-		// 									{MakeRefType(dt)}));
-
-		// OP_REQUIRES_OK(context,
-        //            context->GetAttr("use_locking", &use_exclusive_lock_));
+		OP_REQUIRES_OK(context,
+                   context->GetAttr("use_locking", &use_exclusive_lock_));
 
 	}
 
 	void Compute(OpKernelContext* context) override {
+		// We always return the input ref.
+    	context->forward_ref_input_to_ref_output(0, 0);
+
+		if (use_exclusive_lock_) {
+			mutex_lock l(*context->input_ref_mutex(0));
+			DoUpdate(context);
+		} else {
+			DoUpdate(context);
+		}
+	}
+private:
+	void DoUpdate(OpKernelContext* context) {
 		// Grab the input tensor
-		const Tensor& r_tensor = context->input(0);
+		Tensor r_tensor = context->mutable_input(0, use_exclusive_lock_);
 		OP_REQUIRES(context, r_tensor.IsInitialized(),
 					errors::FailedPrecondition("Attempting to use uninitialized "
 											"parameters: ",
@@ -152,38 +159,14 @@ public:
 		auto r_flat = r_tensor.flat<dtype>();
 		auto x_flat = x_tensor.flat<dtype>();
 
-		// std::cout << "here" << __LINE__ << std::endl;
-
-		// x_work_flat.device(context->eigen_device<Device>()).setZero();
-		// std::cout << "here" << __LINE__ << std::endl;
-		// x_work_flat += x_flat; //how do you just copy?
-		// std::cout << "here" << __LINE__ << std::endl;
-
-		Tensor* output_tensor = nullptr;
-		OP_REQUIRES_OK(context,
-			context->allocate_output(0,
-			r_tensor.shape(),&output_tensor));
-
-		//auto output = context->output(0);
-		//out->template flat<Scalar>()
-		auto output_flat = output_tensor->flat<dtype>();
-		// std::cout << "here" << __LINE__ << std::endl;
-		// output.setZero();
-		// std::cout << "here" << __LINE__ << std::endl;
-		// output = r_flat; //how do you just copy?
-		// //const int N = output.size();
-		// std::cout << "here" << __LINE__ << std::endl;
-
 		// Call the cuda kernel launcher
 		launchCholUpdateKernel<Device, dtype>()(
 			context->eigen_device<Device>(),
-			output_flat,
-			x_work_flat,
 			r_flat,
+			x_work_flat,
 			x_flat,
 			batch_size, dim);
 	}
-private:
     TensorFormat data_format_;
 	bool use_exclusive_lock_;
 };

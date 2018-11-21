@@ -33,10 +33,10 @@ template <typename dtype>
 struct launchCholUpdateKernel<GPUDevice, dtype> {
 	void operator()(const GPUDevice& d, 
 			typename TTypes<dtype>::Flat R, typename TTypes<dtype>::Flat x,
-			typename TTypes<dtype>::ConstFlat R_in, typename TTypes<dtype>::ConstFlat x_in,
+			typename TTypes<dtype>::ConstFlat x_in,
 			int batch_size, int dim) {
 		
-		To32Bit(R).device(d) = To32Bit(R_in);
+		//To32Bit(R).device(d) = To32Bit(R_in);
 		To32Bit(x).device(d) = To32Bit(x_in);
 
 		const int kThreadsPerBlock = 1024;

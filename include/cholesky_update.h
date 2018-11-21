@@ -17,6 +17,6 @@ template <typename Device, typename dtype>
 struct launchCholUpdateKernel {
   void operator()(const Device& d,
             typename TTypes<dtype>::Flat output, typename TTypes<dtype>::Flat x_workspace,
-            const typename TTypes<dtype>::ConstFlat R, const typename TTypes<dtype>::ConstFlat x,
+            const typename TTypes<dtype>::ConstFlat x,
             int batch_size, int dim);
 };

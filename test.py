@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+import time
 
 import cholesky_update
 
@@ -25,22 +26,17 @@ def compute_expected(chol, data, mean):
     return chol
 
 n = 100
-m = 10
+m = 129*250
 k = 19
 
-chol = [np.eye(k)*1e-5 for _ in range(m)]
-data = np.array([[[6, 0]],
- [[6, 3]],
- [[4, 4]]])
+R_init = tf.eye(k,batch_shape=[m])
 data = np.random.randint(0, 10, (n,m,k))
 mean = np.mean(data,0)
 
-expected = compute_expected(chol, data, mean)
-#print(x_data)
-
-R = tf.placeholder(tf.float32, shape=[m,k,k], name="R")
+R = tf.get_variable("R", initializer=R_init)
 x = tf.placeholder(tf.float32, shape=[m,k], name="x")
-with tf.device("gpu:0"):
+
+with tf.device("cpu:0"):
     update_op = cholesky_update.chol_update(R,x)
 print(update_op)
 
@@ -48,9 +44,18 @@ config = tf.ConfigProto(log_device_placement = True)
 config.graph_options.optimizer_options.opt_level = -1
 
 with tf.Session(config=config) as sess:
+    sess.run(tf.global_variables_initializer())
+    chol = sess.run(R_init)
+    #may take a while to compue this:
+    #expected = compute_expected(chol, data, mean)
+    start = time.time()
     for i in range(n):
-        feed = {R: chol, x: data[i] - mean}
-        chol = sess.run(update_op, feed_dict=feed)
-    # print("expected:\n", expected)
-    # print("result:\n", chol)
-    print(np.mean(np.square(chol - expected)))
+        feed = {x: data[i] - mean}
+        sess.run(update_op, feed_dict=feed)
+    chol = sess.run(R)
+    print("ellapsed:", time.time() - start)
+
+abs_diff = np.abs(expected - chol)
+
+print("max:", np.max(abs_diff))
+print("mean:", np.mean(abs_diff))
