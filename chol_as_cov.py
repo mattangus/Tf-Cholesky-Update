@@ -2,9 +2,9 @@ import tensorflow as tf
 import numpy as np
 import cholesky_update
 
-n = 100
-m = 10
-k = 19
+n = 300
+m = 1
+k = 500
 
 chol = [np.eye(k)*1e-5 for _ in range(m)]
 data = np.random.randint(0, 10, (n,m,k))
@@ -24,6 +24,7 @@ with tf.Session(config=config) as sess:
     for i in range(n):
         feed = {x: data[i] - mean}
         sess.run(update_op, feed_dict=feed)
+        print(i)
     chol = sess.run(R)
 
 expected = np.mean([np.cov(data[:,i,:].T) for i in range(m)],0)
