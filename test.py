@@ -1,6 +1,8 @@
 import tensorflow as tf
 import numpy as np
 
+import cholesky_update
+
 def cholupdate(R,x):
     p = np.size(x)
     x = x.T
@@ -22,12 +24,6 @@ def compute_expected(chol, data, mean):
             chol[i] = cholupdate(chol[i], mean_sub[i])
     return chol
 
-try:
-    _tutorial = tf.load_op_library('./build/libcholesky_update.so')
-except Exception as e:
-    _tutorial = tf.load_op_library('./libcholesky_update.so')
-chol_update = _tutorial.chol_update
-
 n = 100
 m = 10
 k = 19
@@ -45,7 +41,7 @@ expected = compute_expected(chol, data, mean)
 R = tf.placeholder(tf.float32, shape=[m,k,k], name="R")
 x = tf.placeholder(tf.float32, shape=[m,k], name="x")
 with tf.device("gpu:0"):
-    update_op = chol_update(R,x)
+    update_op = cholesky_update.chol_update(R,x)
 print(update_op)
 
 config = tf.ConfigProto(log_device_placement = True)
