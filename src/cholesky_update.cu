@@ -7,18 +7,20 @@
 
 using GPUDevice = Eigen::GpuDevice;
 
-template <typename dtype>
-__global__ void CholUpdateKernel(dtype* R, dtype* x, int batch_size, int dim){
+template <typename T, typename Tmask>
+__global__ void CholUpdateKernel(T* R, T* x, const Tmask* m, int batch_size, int dim){
 	for(int b : tensorflow::CudaGridRangeX(batch_size))
 	{
+		if(m[b] == 0)
+			continue;
 		for(int k = 0; k < dim; k++)
 		{
-			dtype Rkk = R[RIND(b,k,k)];
-			dtype xk = x[XIND(b,k)];
+			T Rkk = R[RIND(b,k,k)];
+			T xk = x[XIND(b,k)];
 
-			dtype r = sqrt(Rkk*Rkk + xk*xk);
-			dtype c = r/Rkk;
-			dtype s = xk/Rkk;
+			T r = sqrt(Rkk*Rkk + xk*xk);
+			T c = r/Rkk;
+			T s = xk/Rkk;
 			R[RIND(b,k,k)] = r;
 			for(int i = k+1; i < dim; i++)
 			{
@@ -29,11 +31,11 @@ __global__ void CholUpdateKernel(dtype* R, dtype* x, int batch_size, int dim){
 	}
 }
 
-template <typename dtype>
-struct launchCholUpdateKernel<GPUDevice, dtype> {
+template <typename T, typename Tmask>
+struct launchCholUpdateKernel<GPUDevice, T, Tmask> {
 	void operator()(const GPUDevice& d, 
-			typename TTypes<dtype>::Flat R, typename TTypes<dtype>::Flat x,
-			typename TTypes<dtype>::ConstFlat x_in,
+			typename TTypes<T>::Flat R, typename TTypes<T>::Flat x,
+			typename TTypes<T>::ConstFlat x_in, typename TTypes<Tmask>::ConstFlat m,
 			int batch_size, int dim) {
 		
 		//To32Bit(R).device(d) = To32Bit(R_in);
@@ -41,9 +43,9 @@ struct launchCholUpdateKernel<GPUDevice, dtype> {
 
 		const int kThreadsPerBlock = 1024;
 		
-		CholUpdateKernel<dtype><<<(dim*batch_size + kThreadsPerBlock - 1) / kThreadsPerBlock,
+		CholUpdateKernel<T, Tmask><<<(dim*batch_size + kThreadsPerBlock - 1) / kThreadsPerBlock,
 						kThreadsPerBlock, 0, d.stream()>>>(
-							R.data(), x.data(), batch_size, dim);
+							R.data(), x.data(), m.data(), batch_size, dim);
 
 		cudaError_t cudaerr = cudaDeviceSynchronize();
 		if (cudaerr != cudaSuccess)
@@ -54,10 +56,16 @@ struct launchCholUpdateKernel<GPUDevice, dtype> {
 
 //forward declaration for all the types needed
 typedef Eigen::GpuDevice GPUDevice;
-#define ADD_KERNEL_TYPE(type)							\
-	template struct launchCholUpdateKernel<GPUDevice, type>;	\
+#define ADD_KERNEL_TYPE(type,mtype)							\
+	template struct launchCholUpdateKernel<GPUDevice, type, mtype>;	\
 
-ADD_KERNEL_TYPE(float);
-ADD_KERNEL_TYPE(double);
+ADD_KERNEL_TYPE(float, bool);
+ADD_KERNEL_TYPE(double, bool);
+ADD_KERNEL_TYPE(float, int);
+ADD_KERNEL_TYPE(double, int);
+ADD_KERNEL_TYPE(float, float);
+ADD_KERNEL_TYPE(double, float);
+ADD_KERNEL_TYPE(float, double);
+ADD_KERNEL_TYPE(double, double);
 
 #undef ADD_KERNEL_TYPE

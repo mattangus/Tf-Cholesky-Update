@@ -13,10 +13,10 @@
 
 using namespace tensorflow;
 
-template <typename Device, typename dtype>
+template <typename Device, typename T, typename Tmask>
 struct launchCholUpdateKernel {
   void operator()(const Device& d,
-            typename TTypes<dtype>::Flat output, typename TTypes<dtype>::Flat x_workspace,
-            const typename TTypes<dtype>::ConstFlat x,
+            typename TTypes<T>::Flat output, typename TTypes<T>::Flat x_workspace,
+            typename TTypes<T>::ConstFlat x, typename TTypes<Tmask>::ConstFlat m,
             int batch_size, int dim);
 };

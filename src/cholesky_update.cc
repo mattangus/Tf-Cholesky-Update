@@ -29,11 +29,17 @@ Status ShapeFn(InferenceContext* c)
 	ShapeHandle x_shape;
 	TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 2, &x_shape));
 
+	ShapeHandle m_shape;
+	TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &m_shape));
+
 	int r_rank = c->Rank(r_shape);
 	int x_rank = c->Rank(x_shape);
 	//R must be square
 	if (c->Value(c->Dim(r_shape,r_rank - 1)) != c->Value(c->Dim(r_shape, r_rank - 2)))
-			return errors::InvalidArgument("a must be square");
+			return errors::InvalidArgument("R must be square");
+	
+	if (c->Value(c->Dim(m_shape,0)) != c->Value(c->Dim(m_shape, 0)))
+		return errors::InvalidArgument("Batch size must match mask size");
 
 	//R must match shape of xx^T
 	for(int i = 0; i < 2; i++)
@@ -58,9 +64,11 @@ Status ShapeFn(InferenceContext* c)
 REGISTER_OP("CholUpdate")
 		.Input("r: Ref(T)")
 		.Input("x: T")
+		.Input("m: Tmask")
 		.Output("c: Ref(T)")
         .Attr(GetConvnetDataFormatAttrString())
 		.Attr("T: {float32, float64}")
+		.Attr("Tmask: {bool,int32,float32,float64}")
 		.Attr("use_locking: bool = true")
 		.SetShapeFn(ShapeFn);
 
@@ -69,11 +77,11 @@ REGISTER_OP("CholUpdate")
 // 	return (b*dim + h)*dim + w;
 // }
 
-template <typename dtype>
-struct launchCholUpdateKernel<CPUDevice, dtype> {
+template <typename T, typename Tmask>
+struct launchCholUpdateKernel<CPUDevice, T, Tmask> {
 	void operator()(const CPUDevice& d,
-			typename TTypes<dtype>::Flat R, typename TTypes<dtype>::Flat x,
-            typename TTypes<dtype>::ConstFlat x_in,
+			typename TTypes<T>::Flat R, typename TTypes<T>::Flat x,
+            typename TTypes<T>::ConstFlat x_in, typename TTypes<Tmask>::ConstFlat m,
 			int batch_size, int dim) {
 		//based on https://stackoverflow.com/a/16160905/1097517
 		//R.setZero();
@@ -83,14 +91,16 @@ struct launchCholUpdateKernel<CPUDevice, dtype> {
 
 		for(int b = 0; b < batch_size; b++)
 		{
+			if(m(b) == 0)
+				continue;
 			for(int k = 0; k < dim; k++)
 			{
-				dtype Rkk = R(RIND(b,k,k));
-				dtype xk = x(XIND(b,k));
+				T Rkk = R(RIND(b,k,k));
+				T xk = x(XIND(b,k));
 
-				dtype r = sqrt(Rkk*Rkk + xk*xk);
-				dtype c = r/Rkk;
-				dtype s = xk/Rkk;
+				T r = sqrt(Rkk*Rkk + xk*xk);
+				T c = r/Rkk;
+				T s = xk/Rkk;
 				R(RIND(b,k,k)) = r;
 				for(int i = k+1; i < dim; i++)
 				{
@@ -102,7 +112,7 @@ struct launchCholUpdateKernel<CPUDevice, dtype> {
 	}
 };
 
-template <typename Device, typename dtype>
+template <typename Device, typename T, typename Tmask>
 class CholUpdateOp : public OpKernel {
 public:
 
@@ -145,26 +155,30 @@ private:
 											"parameters: ",
 											requested_input(0)));
 		const Tensor& x_tensor = context->input(1);
+		const Tensor& m_tensor = context->input(2);
+	
 
 		Tensor x_workspace;
     	OP_REQUIRES_OK(context, context->allocate_temp(
-							DataTypeToEnum<dtype>::v(),
+							DataTypeToEnum<T>::v(),
 							x_tensor.shape(), &x_workspace));
 
 		int batch_size = GetTensorDim(r_tensor.shape(), data_format_, 'N');
 		int dim = GetTensorDim(r_tensor.shape(), data_format_, 'H');
 
 		//flatten tensors
-		auto x_work_flat = x_workspace.flat<dtype>();
-		auto r_flat = r_tensor.flat<dtype>();
-		auto x_flat = x_tensor.flat<dtype>();
+		auto x_work_flat = x_workspace.flat<T>();
+		auto r_flat = r_tensor.flat<T>();
+		auto x_flat = x_tensor.flat<T>();
+		auto m_flat = m_tensor.flat<Tmask>();
 
 		// Call the cuda kernel launcher
-		launchCholUpdateKernel<Device, dtype>()(
+		launchCholUpdateKernel<Device, T, Tmask>()(
 			context->eigen_device<Device>(),
 			r_flat,
 			x_work_flat,
 			x_flat,
+			m_flat,
 			batch_size, dim);
 	}
     TensorFormat data_format_;
@@ -172,26 +186,40 @@ private:
 };
 
 //register kernel with types needed
-#define REGISTER_GPU(type) \
+#define REGISTER_GPU(type, mtype) \
 	REGISTER_KERNEL_BUILDER( \
 		Name("CholUpdate") \
 		.Device(DEVICE_GPU) \
-		.TypeConstraint<type>("T"), \
-		CholUpdateOp<GPUDevice, type>) \
+		.TypeConstraint<type>("T") \
+		.TypeConstraint<mtype>("Tmask"), \
+		CholUpdateOp<GPUDevice, type, mtype>) \
 
-REGISTER_GPU(float);
-// REGISTER_GPU(double);
+REGISTER_GPU(float, bool);
+REGISTER_GPU(double, bool);
+REGISTER_GPU(float, int);
+REGISTER_GPU(double, int);
+REGISTER_GPU(float, float);
+REGISTER_GPU(double, float);
+REGISTER_GPU(float, double);
+REGISTER_GPU(double, double);
 
 #undef REGISTER_GPU
 
-#define REGISTER_CPU(type) \
+#define REGISTER_CPU(type, mtype) \
 	REGISTER_KERNEL_BUILDER( \
 		Name("CholUpdate") \
 		.Device(DEVICE_CPU) \
-		.TypeConstraint<type>("T"), \
-		CholUpdateOp<CPUDevice, type>) \
+		.TypeConstraint<type>("T") \
+		.TypeConstraint<mtype>("Tmask"), \
+		CholUpdateOp<CPUDevice, type, mtype>) \
 
-REGISTER_CPU(float);
-// REGISTER_CPU(double);
+REGISTER_CPU(float, bool);
+REGISTER_CPU(double, bool);
+REGISTER_CPU(float, int);
+REGISTER_CPU(double, int);
+REGISTER_CPU(float, float);
+REGISTER_CPU(double, float);
+REGISTER_CPU(float, double);
+REGISTER_CPU(double, double);
 
 #undef REGISTER_CPU
