@@ -22,7 +22,7 @@ config = tf.ConfigProto(log_device_placement = True)
 #config.graph_options.optimizer_options.opt_level = -1
 
 with tf.Session(config=config) as sess:
-    sess.run(tf.global_variables_initializer())
+    sess.run(tf.local_variables_initializer())
     for i in range(n):
         feed = {x: data[i] - mean, mask: mask_v[i]}
         sess.run(update_op, feed_dict=feed)
