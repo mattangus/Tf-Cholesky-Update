@@ -16,7 +16,7 @@ def cholesky_update(x, mask):
 
     assert len(input_shape) == 2, "rank of x must be 2"
 
-    R_init = tf.eye(input_shape[1],batch_shape=[input_shape[0]])*float(1e-3)
+    R_init = tf.eye(input_shape[1],batch_shape=[input_shape[0]])
 
     R = tf.get_variable("R", initializer=R_init)
 
