@@ -40,6 +40,7 @@ def cholesky_update(x, mask, init=1e-5, trainable=False):
     
     Keyword Arguments:
         init {[float]} -- Init value for diagonal `L` matrix. Must be non zero for well conditioned updates
+                            Note that this is essentially the initial value for the conjugate prior.
                             (default: {1e-5})
     
     Returns:
