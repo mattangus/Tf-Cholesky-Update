@@ -10,11 +10,14 @@ base = os.path.dirname(__file__)
 try:
     _lib = tf.load_op_library(os.path.join(base, "./build/libcholesky_update.so"))
 except Exception as e:
+    print("didn't find libcholesky_update in build")
     _lib = tf.load_op_library(os.path.join(base, "./libcholesky_update.so"))
 _chol_update = _lib.chol_update
 
 #taken from metrics_impl. Need custom init function
-def _metric_variable(shape, dtype, initializer=lambda: array_ops.zeros(shape, dtype), validate_shape=True, name=None):
+def _metric_variable(shape, dtype, initializer=None, validate_shape=True, name=None):
+    if initializer is None:
+        initializer = lambda: array_ops.zeros(shape, dtype)
     # Note that synchronization "ON_READ" implies trainable=False.
     return variable_scope.variable(
         initializer,
@@ -40,6 +43,7 @@ def cholesky_update(x, mask, init=1e-5, trainable=False):
     
     Keyword Arguments:
         init {[float]} -- Init value for diagonal `L` matrix. Must be non zero for well conditioned updates
+                            Note that this is essentially the initial value for the conjugate prior.
                             (default: {1e-5})
     
     Returns:
